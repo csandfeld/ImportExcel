@@ -1,7 +1,19 @@
-#cls
+$xlFile = ".\testExport.xlsx"
 
-import-module 
-#Import-Excel .\Book1.xlsx |ft
-#Import-Excel .\TestRead.xlsx
-#Import-Excel .\testImport.xlsx 1 (echo a b c d) | Out-String
-#Import-Excel .\testImport.xlsx 2 (echo e f g h)  | Out-String
+Remove-Item -ErrorAction Ignore $xlFile
+
+$ExportOptions = @{
+    Path              = $xlFile 
+    Show              = $true
+    IncludePivotTable = $true
+    IncludePivotChart = $true
+    PivotRows         = echo Company Name    
+    PivotData         = "PM"
+    ChartType         = "BarClustered3D"
+    #Password          = "Test"
+}
+
+Get-Process | 
+    Where Company |
+    Select Company, Name, Handles, PM | 
+    Export-Excel @ExportOptions 

@@ -43,6 +43,47 @@ function Import-Excel {
     }
 }
 
+function Export-ExcelSheet {
+
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [String]
+        $Path,
+        [String]
+        $OutputPath = '.\',
+        [String]
+        $SheetName,
+        [string]
+        $Encoding = 'UTF8',
+        [string]
+        $Extension = '.txt',
+        [string]
+        $Delimiter = ';'
+    )
+
+    $Path = (Resolve-Path $Path).Path
+    $xl = New-Object -TypeName OfficeOpenXml.ExcelPackage -ArgumentList $Path
+    $workbook = $xl.Workbook
+
+    $targetSheets = $workbook.Worksheets | Where {$_.Name -Match $SheetName}
+
+    $params = @{} + $PSBoundParameters
+    $params.Remove("OutputPath")
+    $params.Remove("SheetName")
+    $params.NoTypeInformation = $true
+
+    Foreach ($sheet in $targetSheets)
+    {
+        Write-Verbose "Exporting sheet: $($sheet.Name)"
+
+        $params.Path = "$($OutputPath)\$($Sheet.Name)$($Extension)"
+
+        Import-Excel $Path -Sheet $($sheet.Name) | Export-Csv @params
+    }
+}
+
 function Export-Excel {
     <#
         .Synopsis
@@ -60,7 +101,13 @@ function Export-Excel {
         $Path,
         [Parameter(ValueFromPipeline)]
         $TargetData,
-        $WorkSheetname="Sheet1",
+        [string]$WorkSheetname="Sheet1",
+        [string]$Title,
+        [OfficeOpenXml.Style.ExcelFillStyle]$TitleFillPattern="None",
+        [bool]$TitleBold,
+        [int]$TitleSize=22,
+        [System.Drawing.Color]$TitleBackgroundColor,
+        #[string]$TitleBackgroundColor,
         [string[]]$PivotRows,
         [string[]]$PivotColumns,
         [string[]]$PivotData,
@@ -88,12 +135,26 @@ function Export-Excel {
             }
 
             $ws  = $pkg.Workbook.Worksheets.Add($WorkSheetname)
+
             $Row = 1
+            if($Title) {
+                $ws.Cells[$Row, 1].Value = $Title
+
+                $ws.Cells[$Row, 1].Style.Font.Size = $TitleSize
+                $ws.Cells[$Row, 1].Style.Font.Bold = $TitleBold
+                $ws.Cells[$Row, 1].Style.Fill.PatternType = $TitleFillPattern
+                if($TitleBackgroundColor) {
+                    $ws.Cells[$Row, 1].Style.Fill.BackgroundColor.SetColor($TitleBackgroundColor)
+                }
+
+                $Row = 2
+            }
+
         } Catch {
             if($AlreadyExists) {
                 throw "$WorkSheetname already exists."
             } else {
-                throw $Error[0].Exception.InnerException
+                throw $Error[0].Exception.Message
             }
         }
     }
@@ -130,7 +191,11 @@ function Export-Excel {
             $wsPivot.View.TabSelected = $true
 
             $pivotTableDataName=$WorkSheetname + "PivotTableData"
-            $range="{0}:{1}" -f $ws.Dimension.Start.Address, $ws.Dimension.End.Address
+
+            $startAddress=$ws.Dimension.Start.Address
+            if($Title) {$startAddress="A2"}
+
+            $range="{0}:{1}" -f $startAddress, $ws.Dimension.End.Address
             $pivotTable = $wsPivot.PivotTables.Add($wsPivot.Cells["A1"], $ws.Cells[$range], $pivotTableDataName)
 
             if($PivotRows) {
@@ -158,7 +223,7 @@ function Export-Excel {
             }
         }
 
-        $ws.Protection.SetPassword($Password)
+        if($Password) { $ws.Protection.SetPassword($Password) }
 
         $pkg.Save()
         $pkg.Dispose()
@@ -167,29 +232,55 @@ function Export-Excel {
     }
 }
 
-function Export-MultipleExcelSheets {
-    param(
-        [Parameter(Mandatory)]
+function ConvertFrom-ExcelSheet {
+    <#
+        .Synopsis
+        Reads an Excel file an converts the data to a delimited text file
+
+        .Example
+        ConvertFrom-ExcelSheet .\TestSheets.xlsx .\data
+        Reads each sheet in TestSheets.xlsx and outputs it to the data directory as the sheet name with the extension .txt
+
+        .Example
+        ConvertFrom-ExcelSheet .\TestSheets.xlsx .\data sheet?0
+        Reads and outputs sheets like Sheet10 and Sheet20 form TestSheets.xlsx and outputs it to the data directory as the sheet name with the extension .txt
+    #>
+
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [String]
         $Path,
-        [Parameter(Mandatory)]
-        [hashtable]$InfoMap,
-        [string]$Password,
-        [Switch]$Show,
-        [Switch]$AutoSize
+        [String]
+        $OutputPath = '.\',
+        [String]
+        $SheetName="*",
+        [string]
+        $Encoding = 'UTF8',
+        [string]
+        $Extension = '.txt',
+        [string]
+        $Delimiter = ';'
     )
 
-    $parameters = @{}+$PSBoundParameters
-    $parameters.Remove("InfoMap")
-    $parameters.Remove("Show")
+    $Path = (Resolve-Path $Path).Path
+    $xl = New-Object -TypeName OfficeOpenXml.ExcelPackage -ArgumentList $Path
+    $workbook = $xl.Workbook
 
-    $parameters.Path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+    $targetSheets = $workbook.Worksheets | Where {$_.Name -like $SheetName}
 
-    foreach ($entry in $InfoMap.GetEnumerator()) {
-        Write-Progress -Activity "Exporting" -Status "$($entry.Key)"
-        $parameters.WorkSheetname=$entry.Key
+    $params = @{} + $PSBoundParameters
+    $params.Remove("OutputPath")
+    $params.Remove("SheetName")
+    $params.NoTypeInformation = $true
 
-        & $entry.Value | Export-Excel @parameters
+    Foreach ($sheet in $targetSheets)
+    {
+        Write-Verbose "Exporting sheet: $($sheet.Name)"
+
+        $params.Path = "$($OutputPath)\$($Sheet.Name)$($Extension)"
+
+        Import-Excel $Path -Sheet $($sheet.Name) | Export-Csv @params
     }
-
-    if($Show) {Invoke-Item $Path}
 }
